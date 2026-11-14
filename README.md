@@ -1,5 +1,7 @@
 # DSH Cold Open
 
+**English** | [简体中文](README.zh-CN.md)
+
 Long-lived [DeepSeek Harness](https://github.com/deepseek-ai) sessions grow without bound: every event stays in memory, so a 435k-event session costs **6.1 GB RSS** and takes **134 s** to open.
 
 This project lets the desktop host open such a session from a **checkpoint + a lazy zstd frame window** instead of decoding and materializing the whole log:
@@ -29,7 +31,7 @@ Three independent layers:
 2. **Runtime patch** (`patch/apply-cold-open.cjs` + `patch/cold-open.js`) — the decode step stops after the header frame and returns a lazy window over the log's zstd frames. Session construction is hydrated from the checkpoint with a private tail view; validation only covers events after the checkpoint cut. A dense frame index is built on first far random read and persisted as `<id>.idx` (2.7 MB).
 3. **Status panel** (`plugins/dsh-coldopen-status`) — `/coldopen` in a session, and **Settings → Cold Open** lists every checkpoint/index/log with sizes and ages.
 
-Every validation failure falls back to the original full restore; a cold read that cannot be served throws instead of returning `undefined`. See [docs/design.md](docs/design.md) for the full architecture and the 24-item pitfall list.
+Every validation failure falls back to the original full restore; a cold read that cannot be served throws instead of returning `undefined`. See [docs/design.md](docs/design.md) for the full architecture and the 35-item pitfall list.
 
 ---
 
@@ -67,7 +69,7 @@ Add them to `%USERPROFILE%\.dsh\profiles\desktop\cordis.patch.yml`:
 node patch\apply-cold-open.cjs "D:\DeepSeek Harness\resources\dsh-runtime"
 ```
 
-The script copies `cold-open.js` into `@deepseek-ai/dsh-session/lib/`, patches 9 runtime files by anchors, runs `node --check` on each result, and **aborts as a whole** if an anchor drifted. It is idempotent.
+The script copies `cold-open.js` into `@deepseek-ai/dsh-session/lib/`, patches 13 runtime files by anchors, runs `node --check` on each result, and **aborts as a whole** if an anchor drifted. It is idempotent.
 
 ### 3. Enable and seed
 
