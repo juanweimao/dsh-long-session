@@ -19,7 +19,7 @@ It does **not** switch sessions, fork them, or rewrite the log. The session id a
 
 > **Also in this repository:** [`heap/`](heap/README.md) — the Windows patch that raises the desktop host's V8 heap ceiling from ~4 GB to 16 GB (an in-place, byte-for-byte edit of `/lib/main.js` inside `app.asar`). Long sessions with a large search index need it; apply it with DSH fully closed, from an external tool.
 
-> **⚠️ Prerequisite: the patch must be applied by an AI outside DSH — or by you.** Do not let the assistant running inside DSH execute it: if the session restarts mid-patch, it goes offline and cannot say "that step was wrong". Searching for this repo, reading the docs, and reviewing afterwards inside DSH are all fine.
+> **⚠️ Prerequisite: the patch must be applied from outside DSH.** Do not let the assistant running inside DSH execute it: if the session restarts mid-patch, it goes offline and cannot say "that step was wrong". Searching for this repo, reading the docs, and reviewing afterwards inside DSH are all fine.
 
 > **Every DSH update wipes this setup.** Updating or reinstalling the desktop app replaces `app.asar` and the extracted runtime, so both the heap patch (`heap/`) and the runtime patches (`patch/`) must be re-applied afterwards. The scripts are idempotent and abort on anchor drift instead of half-patching.
 
