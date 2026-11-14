@@ -1,5 +1,8 @@
 # DSH 桌面版 host 堆上限补丁（4 GB → 16 GB）
 
+> **每次 DSH 更新/重装都要重打！** 升级会替换 `app.asar`（以及 `resources` 下的 runtime），本补丁随之失效，host 堆上限回到 ~4 GB。
+> 更新后请重新执行本页的 `--dry-run` → `apply-host-heap.cjs` → `extract-dsh-runtime.cjs`（如果 runtime 也被替换）。脚本是幂等的，已打过会直接跳过。
+>
 > **强烈建议打上这个补丁**：不打的话，大会话/大索引仍会在 ~4 GB 处 OOM。
 >
 > **但请交给外部工具（另一个 AI 或命令行）在 DSH 完全退出后执行，不要让 DSH 自己改自己的 `app.asar`。**

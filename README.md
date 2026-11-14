@@ -15,6 +15,8 @@ It does **not** switch sessions, fork them, or rewrite the log. The session id a
 
 > **Also in this repository:** [`heap/`](heap/README.md) — the Windows patch that raises the desktop host's V8 heap ceiling from ~4 GB to 16 GB (an in-place, byte-for-byte edit of `/lib/main.js` inside `app.asar`). Long sessions with a large search index need it; apply it with DSH fully closed, from an external tool.
 
+> **Every DSH update wipes this setup.** Updating or reinstalling the desktop app replaces `app.asar` and the extracted runtime, so both the heap patch (`heap/`) and the runtime patches (`patch/`) must be re-applied afterwards. The scripts are idempotent and abort on anchor drift instead of half-patching.
+
 > **Unofficial.** Not affiliated with or endorsed by DeepSeek. The runtime patches depend on DSH internals and are **version-specific**. Modifying the client may violate the product's terms of service — use at your own risk, and back up `~/.dsh` first.
 
 ---

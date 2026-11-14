@@ -298,6 +298,7 @@ digest                : 689f0183d633464654d77efa05208b09e92ade0e600caab98625f041
 
 **风险**
 
+- **DSH 每次更新/重装都会替换 `app.asar` 和 `resources` 下的 runtime，两份补丁（`heap/` 的 asar 补丁 + `patch/` 的 runtime 补丁）都会失效，必须重打。** 更新后 host 堆上限回到 ~4 GB，冷开也会退化为全量恢复（慢、吃内存）。重打顺序：`heap/apply-host-heap.cjs` → `heap/extract-dsh-runtime.cjs`（若 runtime 被替换）→ `patch/apply-cold-open.cjs`；锚点漂移会整体 abort，不会半打。
 - 非官方补丁，依赖 `SurfaceManager._state`、`prepare`、`decodeStoredLog` 等内部结构；DSH 升级后需要重新对锚点。
 - 写端插件读的是私有字段，升级后可能失效；失效时只是不写检查点，不影响会话。
 - 冷窗口下 `toolHistory` 不保存 `headers`（67 MB），极端情况下「老的 developer/message 引用旧 header」会少解析一次工具增补。
