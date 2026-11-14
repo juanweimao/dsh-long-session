@@ -1,4 +1,6 @@
-# DSH 冷开（Cold Open）
+# DSH Long Session（长会话）
+
+> 原名 `dsh-cold-open`。冷开的机制没有变，只是名字改成它解决的问题。
 
 [English](README.md) | **简体中文**
 

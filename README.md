@@ -1,4 +1,6 @@
-# DSH Cold Open
+# DSH Long Session
+
+> Formerly `dsh-cold-open`. The cold-open mechanism is unchanged; the name now says what it fixes.
 
 **English** | [简体中文](README.zh-CN.md)
 
