@@ -21,6 +21,7 @@ surface-checkpoints/
 *.jsonl
 *.tmp
 *.bak
+*.bak-*
 *.orig
 
 # secrets

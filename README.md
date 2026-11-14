@@ -13,6 +13,8 @@ This project lets the desktop host open such a session from a **checkpoint + a l
 
 It does **not** switch sessions, fork them, or rewrite the log. The session id and its history stay exactly where they are.
 
+> **Also in this repository:** [`heap/`](heap/README.md) — the Windows patch that raises the desktop host's V8 heap ceiling from ~4 GB to 16 GB (an in-place, byte-for-byte edit of `/lib/main.js` inside `app.asar`). Long sessions with a large search index need it; apply it with DSH fully closed, from an external tool.
+
 > **Unofficial.** Not affiliated with or endorsed by DeepSeek. The runtime patches depend on DSH internals and are **version-specific**. Modifying the client may violate the product's terms of service — use at your own risk, and back up `~/.dsh` first.
 
 ---

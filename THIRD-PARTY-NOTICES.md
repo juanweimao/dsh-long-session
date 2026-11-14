@@ -24,6 +24,14 @@ runtime:
 interfaces of `@deepseek-ai/dsh-session` and is intended to be installed into
 that package.
 
+`heap/apply-host-heap.cjs` modifies `/lib/main.js` inside DeepSeek Harness's
+`app.asar` and embeds the literal anchor fragments it replaces (the host
+launcher's `node: process.execPath,`, its `"--expose-internals",` argument, and
+`join(app.getAppPath(), "dsh")`). That code is part of the same MIT-licensed
+packages. `heap/extract-dsh-runtime.cjs` only reads the asar archive format and
+verifies extracted files against the header hashes; it contains no DeepSeek
+source.
+
 The MIT License text applicable to those packages follows.
 
 ---
