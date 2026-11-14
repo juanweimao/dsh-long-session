@@ -1,0 +1,17 @@
+{
+  "name": "dsh-surface-checkpoint",
+  "version": "0.1.0",
+  "description": "持久化 surface 折叠检查点：在 turn/end、compaction/end 与 session/created 时把 SurfaceManager 的状态原子写盘，供冷开读取。",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js"
+  ],
+  "license": "MIT"
+}

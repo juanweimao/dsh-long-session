@@ -1,0 +1,25 @@
+{
+  "name": "dsh-coldopen-status",
+  "version": "0.1.0",
+  "description": "在 DSH 里查看冷开状态：设置页面板 + /coldopen 命令。",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "slots"
+      ],
+      "platform": "web"
+    }
+  },
+  "license": "MIT"
+}

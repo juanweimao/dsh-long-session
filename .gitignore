@@ -1,0 +1,28 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# dependencies
+node_modules/
+
+# Local runtime output: session logs, checkpoint sidecars, frame indexes,
+# diagnostics, the search index database. These contain real conversation data
+# and must never be published.
+*.log
+!docs/equivalence-*.log
+*.idx
+surface-checkpoints/
+*.cpuprofile
+*.sqlite
+*.sqlite-*
+*.jsonl
+*.tmp
+*.bak
+*.orig
+
+# secrets
+.env
+.env.*

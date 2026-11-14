@@ -1,0 +1,19 @@
+frames : 227189
+events : 440889 | first seq 0 | last seq 440888
+load   : 13.1 s | rss 3660.1 MB
+
+A full fold      : 0.17 s | nodes 70 | replGen 1099 | contentGen 1100 | projMsgs 16
+checkpoint state : 11499 bytes | nodes 204 | projMsgs 16 | at step/start 438500
+B prefix fold    : 0.14 s | checkpoint nodes 204 | cut event step/start 438500
+B cold fold      : 0.002 s | tail events 2388 | nodes 70 | replGen 1099 | contentGen 1100 | projMsgs 16
+cross-cut reads  : 1 [{"seq":437978,"type":"system/message"}] | cold frame decompress 1
+cold-open span   : frames 1101 | 5054.4 KB of file
+
+nodes equal      : true
+generations equal: true (1099/1100 vs 1099/1100)
+projMsgs equal   : true
+unresolved reads : 0
+VERDICT          : EQUIVALENT
+rss final        : 3665.9 MB
+artifacts        : <tmp>/cold-open-equiv | idx 1.73 MB | cp 11499 B
+expected digest  : 689f0183d633464654d77efa05208b09e92ade0e600caab98625f04131a694ce
