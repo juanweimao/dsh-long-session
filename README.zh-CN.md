@@ -41,7 +41,7 @@
 
 ## 环境要求
 
-- Windows（在 Windows 11 实测），DSH 桌面版 **0.2.2-rc.3 – 0.2.3-alpha.2**（Electron 宿主 + 内置 Node 24）。补丁套件已在 **0.2.2-rc.5** 和 **0.2.3-alpha.2** 上实测；跨版本锚点可能漂移，脚本遇到不匹配会直接 ABORT，不会瞎改。
+- Windows（在 Windows 11 实测），DSH 桌面版 **0.2.2-rc.3 – 0.2.3-alpha.2**（Electron 宿主 + 内置 Node 24）。补丁套件已在**纯净的 0.2.2-rc.3、0.2.2-rc.5 和 0.2.3-alpha.2** 上实测（都是从官方安装包重新解出来的运行时，integrity 全对）；跨版本锚点可能漂移，脚本遇到不匹配会直接 ABORT，不会瞎改。
 - 会话至少已经被压缩过一次（必须存在一个 `surfaceOp: "replace"` 边界）。
 - DSH runtime 已解到 `resources/dsh-runtime`（常见的桌面补丁布局）。
 - 跑补丁脚本需要 Node（用内置的 node 即可）。
