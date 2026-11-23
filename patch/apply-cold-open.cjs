@@ -423,6 +423,48 @@ edit('dsh-agent-loop/lib/index.js', [
   },
 ]);
 
+// ---- 7b) coalesce incremental system-prompt writes -------------------------
+// 0.2.3 appends one system message per systemPrompt section change and keeps
+// every copy until a compaction rebuild. A large volatile section (a memory
+// index) therefore adds a full copy per write. Replace the previous increment
+// in place instead of appending another one — but only when the new message
+// covers every section the previous increment carried: the admission returns a
+// delta, so replacing a delta that holds other sections would silently drop
+// their latest text and fall back to the head's stale copy.
+edit('dsh-agent-loop/lib/index.js', [
+  {
+    label: 'coalesce incremental system-prompt writes',
+    mark: 'this.systemPromptAppend = { sessionId',
+    // 0.2.2 has no systemUpdates() at all (per-source incremental admission is
+    // new in 0.2.3), so the anchor is absent there and the section is skipped.
+    optional: true,
+    find: /([ \t]*)for \(const \{ message, intent \} of assembly\.systemUpdates\(!firstAttempt\)\) this\.session\.append\("system\/message", \{\n\1\tturn,\n\1\tstep,\n\1\tmessage\n\1\}, intent\);/,
+    replace: (m, i) =>
+      `${i}for (const { message, intent } of assembly.systemUpdates(!firstAttempt)) {\n` +
+      `${i}\tconst nodes = this.session.surface.nodes;\n` +
+      `${i}\tconst prev = this.systemPromptAppend;\n` +
+      `${i}\tconst isPromptAppend = intent?.surfaceOp === "append" && message.source?.kind === "system-prompt";\n` +
+      `${i}\tconst names = isPromptAppend ? (message.source.sections ?? []).map((section) => section.name) : [];\n` +
+      `${i}\tconst covers = prev !== void 0 && prev.sessionId === this.session.id && prev.names.every((name) => names.includes(name));\n` +
+      `${i}\tconst replaceable = isPromptAppend && covers && nodes[0] !== prev.seq && nodes.includes(prev.seq);\n` +
+      `${i}\tconst written = this.session.append("system/message", {\n` +
+      `${i}\t\tturn,\n` +
+      `${i}\t\tstep,\n` +
+      `${i}\t\tmessage\n` +
+      `${i}\t}, replaceable ? {\n` +
+      `${i}\t\tsurfaceOp: {\n` +
+      `${i}\t\t\top: "replace",\n` +
+      `${i}\t\t\tstartSeq: prev.seq,\n` +
+      `${i}\t\t\tendSeq: prev.seq\n` +
+      `${i}\t\t},\n` +
+      `${i}\t\tsourceEventSeqs: [prev.seq]\n` +
+      `${i}\t} : intent);\n` +
+      `${i}\tif (isPromptAppend) this.systemPromptAppend = { sessionId: this.session.id, seq: written.seq, names };\n` +
+      `${i}\telse if (intent?.surfaceOp !== "append") this.systemPromptAppend = void 0;\n` +
+      `${i}}`,
+  },
+]);
+
 // ---- 8) session title: memoize the folded title per Session ----------------
 edit('dsh-session-title/lib/index.js', [
   {

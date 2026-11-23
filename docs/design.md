@@ -138,7 +138,7 @@ sourceEventSeqs: [compaction/start, compaction/summary, ...被遮蔽的 seq]
 
 ```text
 ~/.dsh/dshgo-bridge/reapply/
-  apply-cold-open.cjs     ← 14 个文件的补丁（63 个补丁段）
+  apply-cold-open.cjs     ← 14 个文件的补丁（64 个补丁段，其中 2 段按版本 optional）
   cold-open.js            ← 惰性窗口 + 校验 + 水合
 ```
 
@@ -242,6 +242,7 @@ echo 1 > %USERPROFILE%\.dsh\cold-open.on
 | 34 | 高频词的结果仍是“换了几个字的同一句话”；删掉的会话索引行永远留着 | 精确去重只合并完全相同的 snippet；近义段落（同句少几个字、加个标点）仍占多条。缓存行只在会话“关闭”时置 inactive，会话被删除后行还在 | ① 工具层把去重改为 **4-char shingle + Jaccard ≥ 0.8**（先规范化：去高亮标记、折叠空白、小写）；实测同句差一字 0.938、截断 0.933、无关 0.0，100 条结果内两两比较 <50 ms。② 引擎每次 reconcile 比对 `persistence.list()` 与当前 live 集合，把两者都不包含的 `live_sessions` 行连同 `live_docs` 一起删除（`search cache pruned N deleted session(s)`），只在 persistence 可用时执行、失败不影响搜索 |
 | 35 | 搜索会搜到上一次搜索的结果，结果被自己的回声淹没 | 每次搜索都会往日志里写 `tool/call`（查询词）和 `tool/result`（命中列表），两者都进全文索引——于是下次搜索命中上一次的输出，且每次搜索再给下一次加一块 | 索引层排除搜索工具自己的回声：`buildSessionEventSearchDocuments` 与增量路径 `extendObservation` 都跳过 `data.name ∈ {session_event_search, session_search}` 的 `tool/call` 及其 `toolCallId` 对应的 `tool/result`。日志本身不动（账还在），只是不进索引。补丁前已索引的旧回声行可用 `purge-search-echoes.mjs`（DSH 关闭时跑）一次性删除 |
 | 36 | 升级大版本后第一次打开会话，又卡在「载入历史」，宿主 CPU 100% 持续几分钟到二十分钟 | 新版给若干投影升了 `stateVersion`（0.2.3：`contextBreakdown` 6→7、`plan` 4→5、`harnessDevLegacyPrompt` 1→2），缓存行版本不匹配 ⇒ 每个单元都从 seq 0 重放全量事件。冷窗口是懒数组，**读一条事件 = 定位并解压一个 zstd 帧**（约 2 条/帧），3 个单元 × 48 万条 ≈ 72 万次解压 | ① `cold-open.js` 的视图新增 `materialize(from,to)`：按 8 MB 块读文件，**一次 `zstdDecompressSync` 解压整块里所有拼接帧**（Node 的 sync 接口支持多帧），返回普通数组；② `dsh-session-projection` 的 `restore()` 检测到「有单元版本不匹配且 `events` 是冷窗口」时，先 materialize 再重放。实测同一会话（48 万事件、3 个单元）从 5 分半降到十几秒；重建完成后 projcache 写入新版本行，之后打开恢复 5–7 ms |
+| 37 | 升级 0.2.3 后，GUI「系统提示词」每写一次记忆就多一份，3 份叠加到 28.6K token | 0.2.3 把系统提示改成「按来源增量」：非 complete 段变化时 `systemUpdates()` 返回只含变化段的 system 消息，`dsh-agent-loop` 以 `surfaceOp: "append"` 写入；旧增量不回收，只有压缩后的 rebuild 才清空。大体积易变段（35K 字符记忆索引，头部带条数/体积统计）每写一次就整份重发 ≈ +9K token | 补丁让「上一份增量」被原地顶掉：记住上次写入的 seq 与 section 名集合，下一次写入时若新消息的 section **覆盖**上一份（admission 返回的是 delta，用 delta 替换会丢掉其他段的最新文本）、且不在受保护的 node 0，就用 `surfaceOp replace` 替换而不是追加；rebuild 分支清空记录。实测存活 `system/message` 稳定在 2（head + 最新增量）；0.2.2 没有 `systemUpdates()`，该段 `optional` 自动跳过 |
 
 ---
 
