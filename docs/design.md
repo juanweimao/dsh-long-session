@@ -138,7 +138,7 @@ sourceEventSeqs: [compaction/start, compaction/summary, ...被遮蔽的 seq]
 
 ```text
 ~/.dsh/dshgo-bridge/reapply/
-  apply-cold-open.cjs     ← 14 个文件的补丁（64 个补丁段，其中 2 段按版本 optional）
+  apply-cold-open.cjs     ← 14 个文件的补丁（75 个补丁段，其中 2 段按版本 optional）
   cold-open.js            ← 惰性窗口 + 校验 + 水合
 ```
 
@@ -243,6 +243,7 @@ echo 1 > %USERPROFILE%\.dsh\cold-open.on
 | 35 | 搜索会搜到上一次搜索的结果，结果被自己的回声淹没 | 每次搜索都会往日志里写 `tool/call`（查询词）和 `tool/result`（命中列表），两者都进全文索引——于是下次搜索命中上一次的输出，且每次搜索再给下一次加一块 | 索引层排除搜索工具自己的回声：`buildSessionEventSearchDocuments` 与增量路径 `extendObservation` 都跳过 `data.name ∈ {session_event_search, session_search}` 的 `tool/call` 及其 `toolCallId` 对应的 `tool/result`。日志本身不动（账还在），只是不进索引。补丁前已索引的旧回声行可用 `purge-search-echoes.mjs`（DSH 关闭时跑）一次性删除 |
 | 36 | 升级大版本后第一次打开会话，又卡在「载入历史」，宿主 CPU 100% 持续几分钟到二十分钟 | 新版给若干投影升了 `stateVersion`（0.2.3：`contextBreakdown` 6→7、`plan` 4→5、`harnessDevLegacyPrompt` 1→2），缓存行版本不匹配 ⇒ 每个单元都从 seq 0 重放全量事件。冷窗口是懒数组，**读一条事件 = 定位并解压一个 zstd 帧**（约 2 条/帧），3 个单元 × 48 万条 ≈ 72 万次解压 | ① `cold-open.js` 的视图新增 `materialize(from,to)`：按 8 MB 块读文件，**一次 `zstdDecompressSync` 解压整块里所有拼接帧**（Node 的 sync 接口支持多帧），返回普通数组；② `dsh-session-projection` 的 `restore()` 检测到「有单元版本不匹配且 `events` 是冷窗口」时，先 materialize 再重放。实测同一会话（48 万事件、3 个单元）从 5 分半降到十几秒；重建完成后 projcache 写入新版本行，之后打开恢复 5–7 ms |
 | 37 | 升级 0.2.3 后，GUI「系统提示词」每写一次记忆就多一份，3 份叠加到 28.6K token | 0.2.3 把系统提示改成「按来源增量」：非 complete 段变化时 `systemUpdates()` 返回只含变化段的 system 消息，`dsh-agent-loop` 以 `surfaceOp: "append"` 写入；旧增量不回收，只有压缩后的 rebuild 才清空。大体积易变段（35K 字符记忆索引，头部带条数/体积统计）每写一次就整份重发 ≈ +9K token | 补丁让「上一份增量」被原地顶掉：记住上次写入的 seq 与 section 名集合，下一次写入时若新消息的 section **覆盖**上一份（admission 返回的是 delta，用 delta 替换会丢掉其他段的最新文本）、且不在受保护的 node 0，就用 `surfaceOp replace` 替换而不是追加；rebuild 分支清空记录。实测存活 `system/message` 稳定在 2（head + 最新增量）；0.2.2 没有 `systemUpdates()`，该段 `optional` 自动跳过 |
+| 38 | 打完 #37 仍是 17.9K：head（完整提示词，含旧记忆索引 40,293 字符）+ 最新索引增量（31,221 字符），恒定两份 | 增量只能挡住「第 3、4 份」，挡不住「head 里的旧份 + 最新一份」——0.2.3 没有「从 head 里摘掉某一段」的操作，而大体积易变段每轮都值得单独更新 | 引入 **volatile 段**：section 注册加 `volatile: true` 后，`replaceSystemPrompt` / `rebuildSystemPrompt` 建 head 时跳过它；重置类消息之后补发一条只含 volatile 段的增量（避免重置当轮缺段）；普通 delta 里把 volatile 段拆成独立消息；若当前 head 仍携带 volatile（升级前的旧 head），自愈一次：重建 head + 补发增量。实测 head 9,120 字符（2,294 tok）+ 增量 31,147 字符（7,791 tok）= **10,085 tok**，回到升级前水平；之后每次变化只顶掉上一条增量。记忆插件把 `dsh-memory:long-term` 标为 volatile；0.2.2 无 admission 模型，整段被守卫跳过 |
 
 ---
 

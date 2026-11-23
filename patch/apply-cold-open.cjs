@@ -931,4 +931,171 @@ edit('dsh-llm-deepseek/lib/index.js', [
   },
 ]);
 
+// ---- 9) volatile system-prompt sections ------------------------------------
+// 0.2.3 delivers a changed section as an increment while every head
+// (replace/rebuild) keeps a full copy of the same section, so a large volatile
+// section (the memory index, ~31K chars) is always present twice. Sections
+// registered with `volatile: true` are excluded from every head and delivered as
+// their own increment; a stale head (from before this patch) is rebuilt once.
+const systemPromptLib = path.join(BASE, 'dsh-system-prompt/lib/index.js');
+if (fs.existsSync(systemPromptLib) && fs.readFileSync(systemPromptLib, 'utf8').includes('assembleSystemAdmission(state, sections)')) {
+  edit('dsh-system-prompt/lib/index.js', [
+    {
+      label: 'volatile flag on active sections',
+      mark: 'volatile: section.volatile === true,\n\t\t\t\ttext: text.trim(),',
+      find: /\t\t\t\torder: section\.order,\n\t\t\t\ttext: text\.trim\(\),/,
+      replace: () => '\t\t\t\torder: section.order,\n\t\t\t\tvolatile: section.volatile === true,\n\t\t\t\ttext: text.trim(),',
+    },
+    {
+      label: 'volatile flag on retired sections',
+      mark: 'volatile: section.volatile === true,\n\t\t\t\tnotice: text.trim(),',
+      find: /\t\t\t\torder: section\.order,\n\t\t\t\tnotice: text\.trim\(\),/,
+      replace: () => '\t\t\t\torder: section.order,\n\t\t\t\tvolatile: section.volatile === true,\n\t\t\t\tnotice: text.trim(),',
+    },
+    {
+      label: 'head replacement skips volatile sections',
+      mark: 'if (section.volatile === true) continue;\n\t\tif (complete || section.text.length > 0) appendSection',
+      find: /\t\tif \(complete \|\| section\.text\.length > 0\) appendSection\(result, section\);/,
+      replace: () => '\t\tif (section.volatile === true) continue;\n\t\tif (complete || section.text.length > 0) appendSection(result, section);',
+    },
+    {
+      label: 'rebuild skips volatile sections',
+      mark: 'if (section.volatile === true) continue;\n\t\tif (complete || section.text.length > 0 || previous.has(section.name))',
+      find: /\t\tif \(section\.kind === "retired"\) continue;\n\t\tif \(complete \|\| section\.text\.length > 0 \|\| previous\.has\(section\.name\)\) appendSection\(result, section\);/,
+      replace: () => '\t\tif (section.kind === "retired") continue;\n\t\tif (section.volatile === true) continue;\n\t\tif (complete || section.text.length > 0 || previous.has(section.name)) appendSection(result, section);',
+    },
+    {
+      label: 'carry the volatile flag through the presentation',
+      mark: 'assembled.volatile = section.volatile;',
+      find: /\t\t\tif \(section\.complete !== void 0\) assembled\.complete = section\.complete;/,
+      replace: () => '\t\t\tif (section.complete !== void 0) assembled.complete = section.complete;\n\t\t\tif (section.volatile !== void 0) assembled.volatile = section.volatile;',
+    },
+    {
+      label: 'volatile increments after a reset replacement',
+      mark: 'withVolatile([replaceSystemPrompt(state, sections, eligibleSections)]',
+      find: /\t\tmessages: \[replaceSystemPrompt\(state, sections, eligibleSections\)\]/,
+      replace: () => '\t\tmessages: withVolatile([replaceSystemPrompt(state, sections, eligibleSections)], sections, previous)',
+    },
+    {
+      label: 'volatile increments after a complete replacement',
+      mark: 'withVolatile([replaceSystemPrompt(state, sections, updates)]',
+      find: /\t\tmessages: \[replaceSystemPrompt\(state, sections, updates\)\]/,
+      replace: () => '\t\tmessages: withVolatile([replaceSystemPrompt(state, sections, updates)], sections, previous)',
+    },
+    {
+      label: 'split volatile increments out of the delta message',
+      mark: 'volatilePart(updates.filter',
+      find: /\tconst result = parts\(\);\n\tfor \(const section of updates\) \{\n\t\tif \(section\.kind === "retired"\) \{\n\t\t\tappendRetirement\(result, section\);\n\t\t\tcontinue;\n\t\t\}\n\t\tconst committed = previous\.get\(section\.name\);\n\t\tif \(committed === void 0 \|\| committed\.text === section\.text\) \{\n\t\t\tappendSection\(result, section\);\n\t\t\tcontinue;\n\t\t\}\n\t\tlet notice = section\.replacement;\n\t\tif \(notice === void 0\) notice = section\.text\.length === 0 \? `The earlier instructions from \$\{section\.name\} no longer apply\.` : `The following replaces the earlier instructions from \$\{section\.name\}\.`;\n\t\tappendSection\(result, section, notice\);\n\t\}\n\treturn \{\n\t\tkind: "append",\n\t\tmessages: \[createMessage\(\{\n\t\t\trole: "system",\n\t\t\tcontent: result\.content,\n\t\t\tsource: \{\n\t\t\t\tkind: "system-prompt",\n\t\t\t\tsections: result\.sections\n\t\t\t\}\n\t\t\}\)\]\n\t\};/,
+      replace: () =>
+        '\tconst messages = [];\n' +
+        '\tconst plainUpdates = updates.filter((section) => !(section.kind === "active" && section.volatile === true));\n' +
+        '\tif (plainUpdates.length > 0) {\n' +
+        '\t\tconst result = parts();\n' +
+        '\t\tfor (const section of plainUpdates) {\n' +
+        '\t\t\tif (section.kind === "retired") {\n' +
+        '\t\t\t\tappendRetirement(result, section);\n' +
+        '\t\t\t\tcontinue;\n' +
+        '\t\t\t}\n' +
+        '\t\t\tconst committed = previous.get(section.name);\n' +
+        '\t\t\tif (committed === void 0 || committed.text === section.text) {\n' +
+        '\t\t\t\tappendSection(result, section);\n' +
+        '\t\t\t\tcontinue;\n' +
+        '\t\t\t}\n' +
+        '\t\t\tlet notice = section.replacement;\n' +
+        '\t\t\tif (notice === void 0) notice = section.text.length === 0 ? `The earlier instructions from ${section.name} no longer apply.` : `The following replaces the earlier instructions from ${section.name}.`;\n' +
+        '\t\t\tappendSection(result, section, notice);\n' +
+        '\t\t}\n' +
+        '\t\tmessages.push(createMessage({\n' +
+        '\t\t\trole: "system",\n' +
+        '\t\t\tcontent: result.content,\n' +
+        '\t\t\tsource: {\n' +
+        '\t\t\t\tkind: "system-prompt",\n' +
+        '\t\t\t\tsections: result.sections\n' +
+        '\t\t\t}\n' +
+        '\t\t}));\n' +
+        '\t}\n' +
+        '\tconst volatileMessage = volatilePart(updates.filter((section) => section.kind === "active" && section.volatile === true), previous);\n' +
+        '\tif (volatileMessage !== void 0) messages.push(volatileMessage);\n' +
+        '\treturn { kind: "append", messages };',
+    },
+    {
+      label: 'rebuild once when the head still carries a volatile section',
+      mark: 'headHasVolatile(session, sections)',
+      find: /\t\tconst admission = assembleSystemAdmission\(state, sections\);\n/,
+      replace: () =>
+        '\t\tconst admission = assembleSystemAdmission(state, sections);\n' +
+        '\t\tif (admission.kind === "append" && session !== void 0 && headHasVolatile(session, sections)) {\n' +
+        '\t\t\tconst previous = new Map(state.sections.map((section) => [section.name, section]));\n' +
+        '\t\t\tconst messages = [rebuildSystemPrompt(previous, sections, sections.some((section) => section.complete))];\n' +
+        '\t\t\tconst extra = volatilePart(sections, previous);\n' +
+        '\t\t\tif (extra !== void 0) messages.push(extra);\n' +
+        '\t\t\treturn rebuildUpdates(session, messages);\n' +
+        '\t\t}\n',
+    },
+    {
+      label: 'rebuild updates carry volatile increments',
+      mark: 'const messages = [admission.message];',
+      find: /\t\tconst \[head, \.\.\.additions\] = session\.surface\.systemNodes;[\s\S]*?\t\treturn updates;\n\t\}/,
+      replace: () =>
+        '\t\tconst messages = [admission.message];\n' +
+        '\t\tconst volatileMessage = volatilePart(sections, new Map(state.sections.map((section) => [section.name, section])));\n' +
+        '\t\tif (volatileMessage !== void 0) messages.push(volatileMessage);\n' +
+        '\t\treturn rebuildUpdates(session, messages);\n' +
+        '\t}',
+    },
+    {
+      label: 'volatile helpers',
+      mark: 'function volatilePart(sections, previous)',
+      find: /\n\}\n\/\/#endregion\n\/\/#region lib\/types\/projection\.js/,
+      replace: () =>
+        '\n}\n' +
+        '/** One system message carrying the volatile sections that changed. */\n' +
+        'function volatilePart(sections, previous) {\n' +
+        '\tconst result = parts();\n' +
+        '\tlet count = 0;\n' +
+        '\tfor (const section of sections) {\n' +
+        '\t\tif (section.kind === "retired") continue;\n' +
+        '\t\tif (section.volatile !== true || section.text.length === 0) continue;\n' +
+        '\t\tconst committed = previous.get(section.name);\n' +
+        '\t\tlet notice;\n' +
+        '\t\tif (committed !== void 0 && committed.text !== section.text) notice = section.replacement ?? `The following replaces the earlier instructions from ${section.name}.`;\n' +
+        '\t\tappendSection(result, section, notice);\n' +
+        '\t\tcount++;\n' +
+        '\t}\n' +
+        '\tif (count === 0) return void 0;\n' +
+        '\treturn createMessage({ role: "system", content: result.content, source: { kind: "system-prompt", sections: result.sections } });\n' +
+        '}\n' +
+        'function withVolatile(messages, sections, previous) {\n' +
+        '\tconst extra = volatilePart(sections, previous);\n' +
+        '\treturn extra === void 0 ? messages : [...messages, extra];\n' +
+        '}\n' +
+        '/** Whether the current head still carries a section that is volatile now. */\n' +
+        'function headHasVolatile(session, sections) {\n' +
+        '\tconst head = session.surface.systemNodes[0];\n' +
+        '\tif (head === void 0) return false;\n' +
+        '\tconst message = session.deriveEventMessage(session.eventAt(head.seq));\n' +
+        '\tconst names = new Set((message?.source?.sections ?? []).map((section) => section.name));\n' +
+        '\treturn sections.some((section) => section.kind === "active" && section.volatile === true && names.has(section.name));\n' +
+        '}\n' +
+        '/** Empty the increments and install [head, ...volatile] on the surface. */\n' +
+        'function rebuildUpdates(session, messages) {\n' +
+        '\tconst [head, ...additions] = session.surface.systemNodes;\n' +
+        '\tconst updates = [];\n' +
+        '\tfor (const { seq, isEmpty } of additions) {\n' +
+        '\t\tif (isEmpty) continue;\n' +
+        '\t\tconst message = createMessage({ role: "system", content: [], source: { kind: "system-prompt", sections: [] } });\n' +
+        '\t\tupdates.push({ message, intent: { surfaceOp: { op: "replace", startSeq: seq, endSeq: seq }, sourceEventSeqs: [seq] } });\n' +
+        '\t}\n' +
+        '\tconst [first, ...extra] = messages;\n' +
+        '\tupdates.push({ message: first, intent: head === void 0 ? { surfaceOp: "append" } : { surfaceOp: { op: "replace", startSeq: head.seq, endSeq: head.seq }, sourceEventSeqs: [head.seq] } });\n' +
+        '\tfor (const message of extra) updates.push({ message, intent: { surfaceOp: "append" } });\n' +
+        '\treturn updates;\n' +
+        '}\n' +
+        '//#endregion\n//#region lib/types/projection.js',
+    },
+  ]);
+} else {
+  log('dsh-system-prompt/lib/index.js: no admission model in this version, skipped');
+}
+
 log('done');
