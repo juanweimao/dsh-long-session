@@ -138,7 +138,7 @@ sourceEventSeqs: [compaction/start, compaction/summary, ...被遮蔽的 seq]
 
 ```text
 ~/.dsh/dshgo-bridge/reapply/
-  apply-cold-open.cjs     ← 9 个文件的补丁
+  apply-cold-open.cjs     ← 14 个文件的补丁（63 个补丁段）
   cold-open.js            ← 惰性窗口 + 校验 + 水合
 ```
 
@@ -148,7 +148,9 @@ sourceEventSeqs: [compaction/start, compaction/summary, ...被遮蔽的 seq]
 node apply-cold-open.cjs "<DSH_INSTALL>\resources\dsh-runtime"
 ```
 
-脚本会：复制 `cold-open.js`、按锚点改 9 个文件、每步 `node --check`、失败整体中止。重复执行是幂等的（检测 `mark`）。
+脚本会：复制 `cold-open.js`、按锚点改 14 个文件、每步 `node --check`、失败整体中止。重复执行是幂等的（检测 `mark`）。
+
+锚点是按版本写死的：0.2.3-alpha.2 相对 0.2.2 有五处漂移（`dsh-tools/lib/types/index.js` 被移除、jsonl 与 sqlite 的导入列表变动、`readColdSessionLog` 返回对象新增 `persistedEventCount`、`Session.create` 冷路径被 `sessions.prepare` 取代），脚本已按新锚点更新；个别段标了 `optional`，新版没有该代码路径就跳过。下一代版本若再变，`edit()` 会在写任何文件前 ABORT，并打印具体文件名与补丁名。
 
 ### 4.3 打开开关并播种
 
@@ -239,6 +241,7 @@ echo 1 > %USERPROFILE%\.dsh\cold-open.on
 | 33 | 每次重启后的第一次搜索还是 37 秒 | live 会话的索引行在 **TEMP 表**里，per-connection，重启即失；第一次搜索只能重新解日志建文档（≈25 s）+ 整表写入（≈11 s） | `live_sessions`/`live_docs` 改为**主库持久表**，加 `active` 列：① 每次打开把 `active` 清零（旧缓存行不进任何查询）；② 第一次观察时若持久行存在且 header 匹配、`MAX(seq) < seq`，用 `MAX(seq)+1` 播种观察（内存文档为空、`__appendOnly=true`），只处理新增事件，并把该行激活；③ 追加/整份写入都保持 `active = 1`；④ 会话关闭只置 `active = 0` 保留缓存。实测：重启后首次搜索 0.75 秒（旧版 37–40 秒） |
 | 34 | 高频词的结果仍是“换了几个字的同一句话”；删掉的会话索引行永远留着 | 精确去重只合并完全相同的 snippet；近义段落（同句少几个字、加个标点）仍占多条。缓存行只在会话“关闭”时置 inactive，会话被删除后行还在 | ① 工具层把去重改为 **4-char shingle + Jaccard ≥ 0.8**（先规范化：去高亮标记、折叠空白、小写）；实测同句差一字 0.938、截断 0.933、无关 0.0，100 条结果内两两比较 <50 ms。② 引擎每次 reconcile 比对 `persistence.list()` 与当前 live 集合，把两者都不包含的 `live_sessions` 行连同 `live_docs` 一起删除（`search cache pruned N deleted session(s)`），只在 persistence 可用时执行、失败不影响搜索 |
 | 35 | 搜索会搜到上一次搜索的结果，结果被自己的回声淹没 | 每次搜索都会往日志里写 `tool/call`（查询词）和 `tool/result`（命中列表），两者都进全文索引——于是下次搜索命中上一次的输出，且每次搜索再给下一次加一块 | 索引层排除搜索工具自己的回声：`buildSessionEventSearchDocuments` 与增量路径 `extendObservation` 都跳过 `data.name ∈ {session_event_search, session_search}` 的 `tool/call` 及其 `toolCallId` 对应的 `tool/result`。日志本身不动（账还在），只是不进索引。补丁前已索引的旧回声行可用 `purge-search-echoes.mjs`（DSH 关闭时跑）一次性删除 |
+| 36 | 升级大版本后第一次打开会话，又卡在「载入历史」，宿主 CPU 100% 持续几分钟到二十分钟 | 新版给若干投影升了 `stateVersion`（0.2.3：`contextBreakdown` 6→7、`plan` 4→5、`harnessDevLegacyPrompt` 1→2），缓存行版本不匹配 ⇒ 每个单元都从 seq 0 重放全量事件。冷窗口是懒数组，**读一条事件 = 定位并解压一个 zstd 帧**（约 2 条/帧），3 个单元 × 48 万条 ≈ 72 万次解压 | ① `cold-open.js` 的视图新增 `materialize(from,to)`：按 8 MB 块读文件，**一次 `zstdDecompressSync` 解压整块里所有拼接帧**（Node 的 sync 接口支持多帧），返回普通数组；② `dsh-session-projection` 的 `restore()` 检测到「有单元版本不匹配且 `events` 是冷窗口」时，先 materialize 再重放。实测同一会话（48 万事件、3 个单元）从 5 分半降到十几秒；重建完成后 projcache 写入新版本行，之后打开恢复 5–7 ms |
 
 ---
 

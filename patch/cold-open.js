@@ -458,6 +458,51 @@ ${new Error().stack}`);
         return i < 0 || i >= lengthOf() ? undefined : readAtSeq(i);
       },
       slice(from = 0, to = lengthOf()) { return range(from, to); },
+      // Bulk materialization for fold loops that index every event (projection
+      // replays). Reading through get() costs one frame decompression per two
+      // events; a chunk here decompresses many concatenated frames in one call.
+      materialize(from = 0, to = lengthOf()) {
+        const lo = Math.max(0, from);
+        const hi = Math.min(lengthOf(), to);
+        const out = [];
+        const headEnd = Math.min(hi, base);
+        if (lo < headEnd) {
+          const first = findFrame(lo);
+          if (first === undefined) throw new ColdWindowMiss(`seq ${lo} outside the window`);
+          if (first.firstSeq > lo) throw new ColdWindowMiss(`gap at seq ${lo}`);
+          let cursor = first.start;
+          while (cursor < size) {
+            let len = Math.min(8 * 1024 * 1024, size - cursor);
+            let buffer;
+            let starts;
+            let end;
+            for (;;) {
+              buffer = readAt(cursor, len);
+              starts = frameStartsIn(buffer).map((at) => cursor + at);
+              if (starts.length === 0 || starts[0] !== cursor) throw new ColdWindowMiss(`frame boundary lost at ${cursor}`);
+              const atEof = cursor + len === size;
+              end = atEof ? size : starts.length > 1 ? starts.at(-1) : undefined;
+              if (end !== undefined) break;
+              if (atEof) throw new ColdWindowMiss(`no complete frame at ${cursor}`);
+              len = Math.min(len * 2, size - cursor);
+            }
+            const text = zlib.zstdDecompressSync(buffer.subarray(0, end - cursor)).toString("utf8");
+            for (const line of text.split("\n")) {
+              if (line.length === 0) continue;
+              let event;
+              try { event = JSON.parse(line); } catch { continue; }
+              if (event !== null && typeof event === "object" && typeof event.seq === "number" && event.seq >= lo && event.seq < headEnd) out.push(event);
+            }
+            cursor = end;
+            if (out.length >= headEnd - lo) break;
+          }
+        }
+        const fromTail = Math.max(0, lo - base);
+        const toTail = Math.max(0, hi - base);
+        for (let i = fromTail; i < toTail; i++) out.push(tail[i]);
+        coldTrace(`materialize from=${lo} to=${hi} events=${out.length}`);
+        return out;
+      },
       *entries() { let i = 0; for (const event of range(0, lengthOf())) yield [i++, event]; },
       findLast(fn) { let last; let i = 0; for (const event of range(0, lengthOf())) if (fn(event, i++)) last = event; return last; },
       push(event) { tail.push(event); return lengthOf(); },

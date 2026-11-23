@@ -41,7 +41,7 @@ Every validation failure falls back to the original full restore; a cold read th
 
 ## Requirements
 
-- Windows (tested on Windows 11), DSH desktop **0.2.2-rc.3** (Electron host + bundled Node 24).
+- Windows (tested on Windows 11), DSH desktop **0.2.2-rc.3 – 0.2.3-alpha.2** (Electron host + bundled Node 24). The patch set is verified against 0.2.2-rc.5 and 0.2.3-alpha.2; release-to-release anchors can drift, and the script aborts on any mismatch instead of guessing.
 - A session that has already been compacted at least once (there must be a `surfaceOp: "replace"` boundary).
 - The DSH runtime tree extracted at `resources/dsh-runtime` (the usual desktop patch setup).
 - Node available for the patch script (the bundled node works).

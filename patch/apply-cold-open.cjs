@@ -45,7 +45,10 @@ function edit(rel, patches) {
       continue;
     }
     const match = src.match(patch.find);
-    if (match === null) die(`${rel}: anchor drift for "${patch.label}" — refusing to guess`);
+    if (match === null) {
+      if (patch.optional === true) { log(`${rel}: ${patch.label} not present in this version, skipped`); continue; }
+      die(`${rel}: anchor drift for "${patch.label}" — refusing to guess`);
+    }
     src = src.replace(patch.find, patch.replace);
     changed = true;
     log(`${rel}: ${patch.label} applied`);
@@ -195,8 +198,10 @@ edit('dsh-session-persistence-jsonl/lib/index.js', [
   {
     label: 'import attachCheckpoint',
     mark: ', attachCheckpoint }',
-    find: /import \{ KNOWN_SESSION_EVENT_TYPES, SESSION_FORMAT_VERSION, Session, SessionId, SessionLogOffset \} from "@deepseek-ai\/dsh-session";/,
-    replace: 'import { KNOWN_SESSION_EVENT_TYPES, SESSION_FORMAT_VERSION, Session, SessionId, SessionLogOffset, attachCheckpoint } from "@deepseek-ai/dsh-session";',
+    // 0.2.2-rc5: imports Session, SessionId, SessionLogOffset
+    // 0.2.3:      drops Session/SessionId, adds validateSessionLog
+    find: /import \{ KNOWN_SESSION_EVENT_TYPES, SESSION_FORMAT_VERSION, [^}]*\} from "@deepseek-ai\/dsh-session";/,
+    replace: (matched) => matched.replace(' } from "@deepseek-ai/dsh-session";', ', attachCheckpoint } from "@deepseek-ai/dsh-session";'),
   },
   {
     label: 'stop decoding after the header frame',
@@ -234,18 +239,22 @@ edit('dsh-session-query/lib/index.js', [
   {
     label: 'keep the lazy range in readColdSessionLog',
     mark: 'const coldSeed = events.__cold === true;',
-    find: /([ \t]*)const \{ events \} = read;\n\1return \{\n\1\teventState: read\.eventState,\n\1\theader: handle\.header,\n\1\tinheritedEventCount: handle\.inheritedEventCount,\n\1\tevents: \[\.\.\.events, \.\.\.interruptedTurnClosers\(events\)\]\n\1\};/,
-    replace: (m, i) =>
+    // 0.2.3 inserted `persistedEventCount` into the returned object, so rebuild
+    // only the head of the return and patch the events line separately (5b).
+    find: /([ \t]*)const \{ events \} = read;\n(\1return \{)/,
+    replace: (m, i, ret) =>
       `${i}const { events } = read;\n` +
       `${i}const closers = interruptedTurnClosers(events);\n` +
       `${i}const coldSeed = events.__cold === true;\n` +
-      `${i}return {\n` +
-      `${i}\teventState: read.eventState,\n` +
-      `${i}\theader: handle.header,\n` +
-      `${i}\tinheritedEventCount: handle.inheritedEventCount,\n` +
-      `${i}\tevents: coldSeed ? events : [...events, ...closers],\n` +
-      `${i}\tclosers: coldSeed ? closers : []\n` +
-      `${i}};`,
+      `${ret}`,
+  },
+  {
+    label: 'cold closers on the events line',
+    mark: 'events: coldSeed ? events',
+    find: /([ \t]*)events: \[\.\.\.events, \.\.\.interruptedTurnClosers\(events\)\]/,
+    replace: (m, i) =>
+      `${i}events: coldSeed ? events : [...events, ...closers],\n` +
+      `${i}closers: coldSeed ? closers : []`,
   },
   {
     label: 'pass cold closers into prepare',
@@ -263,6 +272,9 @@ edit('dsh-session-query/lib/index.js', [
   {
     label: 'pass cold closers into Session.create',
     mark: 'currentSessionMessageProjections, loaded.closers',
+    // 0.2.3 removed the Session.create() path: every cold read goes through
+    // sessions.prepare() now, so only the prepare patch applies there.
+    optional: true,
     find: /([ \t]*)Session\.create\(sessionId, loaded\.events, loaded\.header, loaded\.inheritedEventCount, currentSessionMessageProjections\);/,
     replace: (m, i) =>
       `${i}Session.create(sessionId, loaded.events, loaded.header, loaded.inheritedEventCount, currentSessionMessageProjections, loaded.closers);`,
@@ -280,6 +292,35 @@ edit('dsh-session-query/lib/index.js', [
       '\t\tevents: cold ? session.snapshotEvents() : session.snapshotEvents().map((event) => structuredClone(event))\n' +
       '\t};\n' +
       '}',
+  },
+]);
+
+// ---- 5b) projection replay: materialize a cold window once -----------------
+// A stateVersion bump (an app upgrade) makes every stored row unusable, and
+// restore() then folds the whole log. Indexing a lazy cold view costs one frame
+// decompression per event; materialize() decodes whole chunks at once, so the
+// replay runs over a plain array instead (2026-11-23: 3 units x 480k events had
+// the host pinned for 20+ minutes after the 0.2.3 upgrade).
+edit('dsh-session-projection/lib/index.js', [
+  {
+    label: 'materialize cold events before a replay',
+    mark: 'events.materialize(0, events.length)',
+    find: /([ \t]*)const endSeq = events\.at\(-1\)\?\.seq \?\? cursorBefore\(baseSeq\);\n\1const beforeBase = cursorBefore\(baseSeq\);/,
+    replace: (m, i) =>
+      `${i}const endSeq = events.at(-1)?.seq ?? cursorBefore(baseSeq);\n` +
+      `${i}const beforeBase = cursorBefore(baseSeq);\n` +
+      `${i}if (events !== undefined && events.__cold === true && typeof events.materialize === "function") {\n` +
+      `${i}\tconst needsReplay = [...this.registrations.values()].some((registration) => {\n` +
+      `${i}\t\tif (registration.refs === 0) return false;\n` +
+      `${i}\t\tconst row = checkpoint[registration.def.key];\n` +
+      `${i}\t\treturn !(row !== undefined && row.ver === registration.def.stateVersion && row.seq >= beforeBase && row.seq <= endSeq);\n` +
+      `${i}\t});\n` +
+      `${i}\tif (needsReplay) {\n` +
+      `${i}\t\tconst materialized = events.materialize(0, events.length);\n` +
+      `${i}\t\tif (materialized.length !== events.length) throw new Error(\`cold window materialized \${materialized.length} of \${events.length} events\`);\n` +
+      `${i}\t\tevents = materialized;\n` +
+      `${i}\t}\n` +
+      `${i}}`,
   },
 ]);
 
@@ -552,9 +593,11 @@ edit('dsh-message-feedback/lib/index.js', [
 edit('dsh-session-query-sqlite/lib/index.js', [
   {
     label: 'import the text extractor for incremental documents',
-    mark: ', extractSessionEventText,',
-    find: /import SessionQueryEngine, \{ SESSION_QUERY_DEFAULT_PERSISTED_INSPECT_CONCURRENCY, SESSION_QUERY_DEFAULT_PREPARED_SESSION_CACHE_SIZE, SESSION_QUERY_READ_WINDOW_MAX, SessionQueryError, SessionSearchCursor, assertSessionHeadersCompatible, buildSessionEventSearchDocuments, materializeSessionEventResultFilters, materializeSessionResultFilters, readColdSessionLog \} from "@deepseek-ai\/dsh-session-query";/,
-    replace: () => "import SessionQueryEngine, { SESSION_QUERY_DEFAULT_PERSISTED_INSPECT_CONCURRENCY, SESSION_QUERY_DEFAULT_PREPARED_SESSION_CACHE_SIZE, SESSION_QUERY_READ_WINDOW_MAX, SessionQueryError, SessionSearchCursor, assertSessionHeadersCompatible, buildSessionEventSearchDocuments, extractSessionEventText, materializeSessionEventResultFilters, materializeSessionResultFilters, readColdSessionLog } from \"@deepseek-ai/dsh-session-query\";",
+    mark: 'extractSessionEventText',
+    // the named-import list drifts between releases (SessionSearchCursor came and
+    // went); locate the import by its module and splice the extractor in.
+    find: /import SessionQueryEngine, \{([^}]*)\} from "@deepseek-ai\/dsh-session-query";/,
+    replace: (m, names) => `import SessionQueryEngine, {${names.replace('buildSessionEventSearchDocuments,', 'buildSessionEventSearchDocuments, extractSessionEventText,')}} from "@deepseek-ai/dsh-session-query";`,
   },
   {
     label: 'extend live observations over appended events only',
